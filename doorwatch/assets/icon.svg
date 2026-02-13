@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Kapı -->
+  <rect x="16" y="8" width="32" height="48" rx="3" ry="3"
+        fill="#5B4A3F" stroke="#3E3028" stroke-width="2"/>
+  <!-- Gözetleme deliği -->
+  <circle cx="32" cy="26" r="6" fill="#1A1A2E" stroke="#B0B0B0" stroke-width="1.5"/>
+  <!-- Lens yansıması -->
+  <circle cx="30" cy="24" r="2" fill="#4FC3F7" opacity="0.7"/>
+  <!-- Kapı kolu -->
+  <circle cx="42" cy="34" r="2.5" fill="#FFD54F" stroke="#F9A825" stroke-width="1"/>
+  <!-- Taban -->
+  <rect x="12" y="54" width="40" height="4" rx="2" fill="#6D4C41"/>
+  <!-- Algılama dalga -->
+  <path d="M 20 18 Q 12 26 20 34" fill="none" stroke="#4FC3F7"
+        stroke-width="1.5" stroke-dasharray="3,2" opacity="0.6"/>
+  <path d="M 44 18 Q 52 26 44 34" fill="none" stroke="#4FC3F7"
+        stroke-width="1.5" stroke-dasharray="3,2" opacity="0.6"/>
+</svg>

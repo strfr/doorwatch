@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+venv/
+
+# Runtime/output
+logs/
+snapshots/
+known_faces/
+dist/
+nohup.out
+doorwatch/nohup.out
+
+# Local settings and caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

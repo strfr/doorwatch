@@ -1,0 +1,5 @@
+# Temel bağımlılıklar (lightweight)
+opencv-python>=4.8.0
+numpy>=1.24.0
+PyGObject>=3.42.0
+cupy-cuda12x>=13.6.0
