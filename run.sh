@@ -17,4 +17,4 @@ if [ -n "$SITE_PACKAGES_DIR" ] && [ -d "$SITE_PACKAGES_DIR/nvidia" ]; then
 fi
 
 cd "$SCRIPT_DIR"
-python3 main.py "$@"
+exec -a doorwatch python3 main.py "$@"
