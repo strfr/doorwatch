@@ -16,9 +16,16 @@ run_local_install() {
     deb_path="$("${build_script}")"
     echo "Package ready: ${deb_path}"
 
+    # apt sandbox warning'ini engellemek icin .deb'i herkesin okuyabildigi
+    # bir gecici konuma kopyalayip oradan kur.
+    local apt_deb
+    apt_deb="/tmp/$(basename "${deb_path}")"
+    install -m 0644 "${deb_path}" "${apt_deb}"
+
     echo "Installing with apt..."
     sudo apt-get update -qq
-    sudo apt-get install -y "${deb_path}"
+    sudo apt-get install -y "${apt_deb}"
+    rm -f "${apt_deb}"
 
     echo
     echo "Installation complete."
