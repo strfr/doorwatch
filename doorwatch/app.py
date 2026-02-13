@@ -1,4 +1,4 @@
-"""DoorWatch ana uygulama: hafif hareket algilama + popup + tray."""
+"""DoorWatch main app: lightweight motion detection + popup + tray."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ log = logging.getLogger("doorwatch")
 
 
 class DoorWatchApp:
-    """Hareket algilayip popup gosteren tray uygulamasi."""
+    """Tray app that detects motion and shows a popup."""
 
     def __init__(self):
         self._setup_logging()
@@ -67,7 +67,7 @@ class DoorWatchApp:
             on_show_settings=self._on_show_settings,
         )
 
-        log.info("DoorWatch baslatildi.")
+        log.info("DoorWatch started.")
 
     def _build_detector(self) -> PersonDetector:
         return PersonDetector(
@@ -179,12 +179,12 @@ class DoorWatchApp:
                 self._camera_reopen_requested = True
                 GLib.idle_add(self._viewer.resize, config.CAPTURE_WIDTH, config.CAPTURE_HEIGHT + 60)
 
-            log.info("Settings uygulandi.")
+            log.info("Settings applied.")
             if storage == "config.py":
-                return True, "Settings kaydedildi (config.py) ve uygulandi."
-            return True, "Settings kaydedildi (~/.config/doorwatch/settings.json) ve uygulandi."
+                return True, "Settings saved (config.py) and applied."
+            return True, "Settings saved (~/.config/doorwatch/settings.json) and applied."
         except Exception as exc:
-            log.exception("Settings uygulanamadi: %s", exc)
+            log.exception("Failed to apply settings: %s", exc)
             return False, str(exc)
 
     def _set_startup_enabled(self, enabled: bool) -> None:
@@ -214,7 +214,7 @@ class DoorWatchApp:
                 self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAPTURE_HEIGHT)
                 self._cap.set(cv2.CAP_PROP_FPS, config.CAPTURE_FPS)
                 log.info(
-                    "Kamera acildi: index=%d (%dx%d @%dfps)",
+                    "Camera opened: index=%d (%dx%d @%dfps)",
                     index,
                     config.CAPTURE_WIDTH,
                     config.CAPTURE_HEIGHT,
@@ -222,15 +222,15 @@ class DoorWatchApp:
                 )
                 return True
             except Exception as exc:
-                log.warning("Kamera index=%d acilamadi: %s", index, exc)
+                log.warning("Failed to open camera index=%d: %s", index, exc)
 
-        log.error("Kamera acilamadi: index=%s (fallback index=0 denendi)", config.CAMERA_INDEX)
+        log.error("Unable to open camera: index=%s (fallback index=0 tried)", config.CAMERA_INDEX)
         return False
 
     def _close_camera(self):
         if self._cap and self._cap.isOpened():
             self._cap.release()
-            log.info("Kamera kapatildi.")
+            log.info("Camera closed.")
 
     def _prepare_detection_frame(
         self,
@@ -238,11 +238,11 @@ class DoorWatchApp:
         viewer_visible: bool,
     ) -> tuple[object, float, float, int]:
         """
-        Camera window kapaliyken algilamayi dusuk cozunurlukte yap.
-        Donus:
-          proc_frame: algilama girdisi
-          sx, sy: proc -> full frame olcekleri
-          min_area_proc: proc frame icin alan esigi
+        Run detection on lower resolution when camera window is hidden.
+        Returns:
+          proc_frame: detection input frame
+          sx, sy: proc -> full frame scale
+          min_area_proc: contour area threshold in proc scale
         """
         fh, fw = frame.shape[:2]
         if viewer_visible:
@@ -309,7 +309,7 @@ class DoorWatchApp:
 
             ret, frame = self._cap.read()
             if not ret:
-                log.warning("Kare okunamadi, tekrar deneniyor...")
+                log.warning("Frame read failed, retrying...")
                 time.sleep(0.5)
                 self._close_camera()
                 while self._running and not self._open_camera():
@@ -338,8 +338,8 @@ class DoorWatchApp:
                 rects = self._scale_rects(proc_rects, sx, sy, frame.shape)
                 significant_motion = has_motion and self._has_significant_motion(rects)
 
-                # Hareket olayi kilidi: popup bir kez tetiklenir, hareket tamamen
-                # bittikten sonra tekrar tetiklenebilir.
+                # Motion event latch: trigger popup once, rearm only after
+                # motion has been gone long enough.
                 if significant_motion:
                     self._no_motion_frames = 0
                     if self._popup_active:
@@ -350,7 +350,7 @@ class DoorWatchApp:
                         self._motion_event_latched = False
 
                 if has_motion:
-                    detection_text = "Hareket"
+                    detection_text = "Motion"
                 else:
                     detection_text = ""
 
@@ -361,7 +361,7 @@ class DoorWatchApp:
                     if not self._motion_event_latched:
                         self._motion_event_latched = True
                         if self._muted:
-                            log.info("Hareket algilandi, silent mode acik. Popup gosterilmedi.")
+                            log.info("Motion detected, silent mode enabled. Popup not shown.")
                         else:
                             self._process_motion(frame)
 
@@ -388,7 +388,7 @@ class DoorWatchApp:
 
         with self._detector_lock:
             self._detector.reset()
-        log.info("Hareket algilandi, popup aciliyor.")
+        log.info("Motion detected, opening popup.")
         GLib.idle_add(self._show_popup, frame.copy())
 
     def _show_popup(self, frame):
@@ -398,13 +398,13 @@ class DoorWatchApp:
         self._popup_active = True
         self._popup_last_motion_at = time.monotonic()
         self._current_popup = VideoPopup(
-            title="DoorWatch - Hareket Algilandi",
+            title="DoorWatch - Motion Detected",
             width=config.POPUP_WIDTH,
             height=config.POPUP_HEIGHT,
             duration_sec=0,
             on_close_cb=self._on_popup_closed,
         )
-        self._current_popup.set_info_text("Hareket algilandi")
+        self._current_popup.set_info_text("Motion detected")
         self._current_popup.update_frame(frame)
         return False
 
@@ -435,7 +435,7 @@ class DoorWatchApp:
         self._viewer.toggle_visibility()
 
     def _on_viewer_closed(self):
-        log.debug("Camera window gizlendi.")
+        log.debug("Camera window hidden.")
 
     def run(self):
         cam_thread = threading.Thread(
@@ -448,9 +448,9 @@ class DoorWatchApp:
         try:
             Gtk.main()
         except KeyboardInterrupt:
-            log.info("Ctrl+C ile cikis.")
+            log.info("Exit via Ctrl+C.")
         finally:
             self._running = False
             cam_thread.join(timeout=3)
             self._close_camera()
-            log.info("DoorWatch kapatildi.")
+            log.info("DoorWatch stopped.")

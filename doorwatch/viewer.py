@@ -1,6 +1,6 @@
 """
-Canlı kamera görüntüleme penceresi – her zaman açık,
-algılama durumunu da gösteren GTK penceresi.
+Live camera viewer window.
+Shows detection state and overlays.
 """
 
 import gi
@@ -16,9 +16,9 @@ log = logging.getLogger("doorwatch.viewer")
 
 
 class CameraViewer(Gtk.Window):
-    """Canlı kamera penceresi – sürekli açık, algılama bilgisi gösterir."""
+    """Live camera window that shows detection info."""
 
-    def __init__(self, title: str = "DoorWatch – Kamera",
+    def __init__(self, title: str = "DoorWatch - Camera",
                  width: int = 640, height: int = 520,
                  on_close_cb=None,
                  start_visible: bool = False):
@@ -30,23 +30,23 @@ class CameraViewer(Gtk.Window):
         self._on_close_cb = on_close_cb
         self._visible = bool(start_visible)
 
-        # Ana kutu
+        # Root container
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.add(vbox)
 
-        # Görüntü alanı
+        # Video area
         self._image = Gtk.Image()
         self._image.set_size_request(width, height - 80)
         vbox.pack_start(self._image, True, True, 0)
 
-        # Durum çubuğu
+        # Status bar
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         hbox.set_margin_start(8)
         hbox.set_margin_end(8)
         hbox.set_margin_top(4)
         hbox.set_margin_bottom(4)
 
-        self._status_label = Gtk.Label(label="⏳ Başlatılıyor...")
+        self._status_label = Gtk.Label(label="Starting...")
         self._status_label.set_xalign(0)
         hbox.pack_start(self._status_label, True, True, 0)
 
@@ -56,7 +56,7 @@ class CameraViewer(Gtk.Window):
 
         vbox.pack_start(hbox, False, False, 0)
 
-        # Pencere kapatıldığında gizle, yok etme
+        # Hide instead of destroy when user closes window
         self.connect("delete-event", self._on_delete)
         if self._visible:
             self.show_all()
@@ -64,15 +64,15 @@ class CameraViewer(Gtk.Window):
             self.hide()
 
     def _on_delete(self, widget, event):
-        """Pencere kapatma isteği – yok etmek yerine gizle."""
+        """Handle window close request by hiding it."""
         self.hide()
         self._visible = False
         if self._on_close_cb:
             self._on_close_cb()
-        return True  # True = yok etme
+        return True  # True = prevent destroy
 
     def toggle_visibility(self):
-        """Pencereyi göster/gizle."""
+        """Toggle viewer visibility."""
         if self._visible:
             self.hide()
             self._visible = False
@@ -96,8 +96,8 @@ class CameraViewer(Gtk.Window):
                      status_text: str = None,
                      detection_text: str = None) -> bool:
         """
-        Canlı kareyi güncelle. Bounding box'ları çizer.
-        GLib.idle_add ile çağrılmalı.
+        Update live frame and draw bounding boxes.
+        Should be called with GLib.idle_add.
         """
         if not self._visible:
             return True
@@ -105,40 +105,40 @@ class CameraViewer(Gtk.Window):
         try:
             display = frame.copy()
 
-            # Bounding box çiz
+            # Draw detection boxes
             if rects:
                 for (x, y, w, h) in rects:
                     cv2.rectangle(display, (x, y), (x + w, y + h),
                                   (0, 255, 0), 2)
-                    cv2.putText(display, "Hareket", (x, y - 10),
+                    cv2.putText(display, "Motion", (x, y - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                                 (0, 255, 0), 2)
 
-            # BGR → RGB → Pixbuf
+            # BGR -> RGB -> Pixbuf
             rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
             h, w, ch = rgb.shape
             pixbuf = GdkPixbuf.Pixbuf.new_from_data(
                 rgb.tobytes(), GdkPixbuf.Colorspace.RGB, False, 8,
                 w, h, w * ch)
 
-            # Pencere boyutuna ölçekle
+            # Scale to image widget
             alloc = self._image.get_allocation()
             tw = max(alloc.width, 320)
             th = max(alloc.height, 240)
-            # En-boy oranını koru
+            # Keep aspect ratio
             scale = min(tw / w, th / h)
             nw, nh = int(w * scale), int(h * scale)
             scaled = pixbuf.scale_simple(nw, nh,
                                          GdkPixbuf.InterpType.BILINEAR)
             self._image.set_from_pixbuf(scaled)
 
-            # Durum etiketleri
+            # Status labels
             if status_text is not None:
                 self._status_label.set_text(status_text)
             if detection_text is not None:
                 self._detection_label.set_text(detection_text)
 
         except Exception as exc:
-            log.error("Viewer kare güncellenemedi: %s", exc)
+            log.error("Failed to update viewer frame: %s", exc)
 
-        return False  # GLib.idle_add tek seferlik
+        return False  # one-shot callback for GLib.idle_add

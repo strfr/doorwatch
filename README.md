@@ -13,6 +13,7 @@ This command:
 - clones repository to a temporary folder
 - builds a `.deb` package
 - installs it with `apt`
+- can be run again safely to update/reinstall
 
 Release page:
 - https://github.com/strfr/doorwatch/releases/latest

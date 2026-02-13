@@ -1,4 +1,4 @@
-"""GTK popup penceresi - kamera goruntusunu kisa sure gosterir."""
+"""GTK popup window - displays camera feed for motion events."""
 
 from __future__ import annotations
 
@@ -16,11 +16,11 @@ log = logging.getLogger("doorwatch.popup")
 
 
 class VideoPopup(Gtk.Window):
-    """Hareket algilaninca acilan, sure dolunca kapanan popup."""
+    """Popup opened on motion detection, closed by timer or state."""
 
     def __init__(
         self,
-        title: str = "DoorWatch - Hareket Algilandi",
+        title: str = "DoorWatch - Motion Detected",
         width: int = 480,
         height: int = 360,
         duration_sec: int = 3,
@@ -36,12 +36,12 @@ class VideoPopup(Gtk.Window):
         self._window_height = int(height)
         self._edge_margin = 24
 
-        # duration_sec <= 0 ise otomatik kapanma devre disi (hareket bazli kontrol).
+        # duration_sec <= 0 disables auto-close (motion-based control from app).
         self._duration = max(0, int(duration_sec))
         self._start_time = time.monotonic()
         self._on_close_cb = on_close_cb
         self._closed = False
-        self._info_text = "Hareket algilandi!"
+        self._info_text = "Motion detected!"
 
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.add(vbox)
@@ -58,7 +58,7 @@ class VideoPopup(Gtk.Window):
         btn_box.set_halign(Gtk.Align.CENTER)
         btn_box.set_margin_bottom(6)
 
-        btn_close = Gtk.Button(label="Kapat")
+        btn_close = Gtk.Button(label="Close")
         btn_close.connect("clicked", self._on_dismiss)
         btn_box.pack_start(btn_close, False, False, 0)
 
@@ -125,14 +125,14 @@ class VideoPopup(Gtk.Window):
             alloc = self._image.get_allocation()
             tw = max(alloc.width, 320)
             th = max(alloc.height, 240)
-            # Orani koruyarak olcekle; goruntu esneyip bozulmasin.
+            # Keep aspect ratio to avoid stretching artifacts.
             scale = min(tw / w, th / h)
             nw = max(1, int(w * scale))
             nh = max(1, int(h * scale))
             scaled = pixbuf.scale_simple(nw, nh, GdkPixbuf.InterpType.BILINEAR)
             self._image.set_from_pixbuf(scaled)
         except Exception as exc:
-            log.error("Popup kare guncellenemedi: %s", exc)
+            log.error("Failed to update popup frame: %s", exc)
 
         return True
 

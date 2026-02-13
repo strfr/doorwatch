@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""DoorWatch – Kapı gözetleme sistemi giriş noktası."""
+"""DoorWatch entry point."""
 
 import sys
 import os
 
-# Proje kökünü path'e ekle
+# Add project root to import path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from doorwatch.app import DoorWatchApp

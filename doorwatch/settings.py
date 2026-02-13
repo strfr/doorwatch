@@ -1,4 +1,4 @@
-"""Tray Settings penceresi."""
+"""Tray settings window."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from gi.repository import Gtk
 
 
 class SettingsWindow(Gtk.Window):
-    """Config degerlerini GUI uzerinden duzenleme penceresi."""
+    """GUI window for editing runtime config values."""
 
     def __init__(
         self,
@@ -47,7 +47,7 @@ class SettingsWindow(Gtk.Window):
 
         row = 0
         row = self._add_camera_row(grid, row, camera_indices)
-        row = self._add_bool_row(grid, row, "Startup'ta Ac", "AUTOSTART_ENABLED", autostart_enabled)
+        row = self._add_bool_row(grid, row, "Start on Login", "AUTOSTART_ENABLED", autostart_enabled)
 
         row = self._add_int_row(grid, row, "Capture Width", "CAPTURE_WIDTH", 160, 3840, 16)
         row = self._add_int_row(grid, row, "Capture Height", "CAPTURE_HEIGHT", 120, 2160, 16)
@@ -167,9 +167,9 @@ class SettingsWindow(Gtk.Window):
         try:
             camera_indices = self._on_refresh_cameras_cb()
             self._populate_camera_combo(camera_indices)
-            self._status_label.set_text("Kamera listesi yenilendi.")
+            self._status_label.set_text("Camera list refreshed.")
         except Exception as exc:
-            self._status_label.set_text(f"Kamera listesi yenilenemedi: {exc}")
+            self._status_label.set_text(f"Failed to refresh camera list: {exc}")
 
     def _collect_settings(self) -> dict[str, int | float | bool]:
         out: dict[str, int | float | bool] = {}
@@ -201,7 +201,7 @@ class SettingsWindow(Gtk.Window):
             self._settings.update(settings)
             self._status_label.set_text(message)
         else:
-            self._status_label.set_text(f"Hata: {message}")
+            self._status_label.set_text(f"Error: {message}")
 
     def _on_close(self, *_args):
         self.destroy()

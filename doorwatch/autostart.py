@@ -1,4 +1,4 @@
-"""Linux autostart (.desktop) yardimcilari."""
+"""Linux autostart (.desktop) helpers."""
 
 from __future__ import annotations
 

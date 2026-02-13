@@ -1,4 +1,4 @@
-"""Config degerlerini runtime ve dosya tarafinda yonetir."""
+"""Manage config values in runtime and persistent storage."""
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def save_to_file(settings: dict[str, int | float | bool]) -> None:
     if missing:
         if out and not out[-1].endswith("\n"):
             out[-1] += "\n"
-        out.append("\n# Runtime settings kaydedildi\n")
+        out.append("\n# Runtime settings saved\n")
         for key in missing:
             out.append(f"{key} = {_format_value(settings[key])}\n")
 
@@ -115,10 +115,10 @@ def save_user_settings(settings: dict[str, int | float | bool]) -> None:
 
 def persist_settings(settings: dict[str, int | float | bool]) -> str:
     """
-    Ayarlari kalici yaz.
-    Donus:
-      - "config.py": kaynak config dosyasina yazildi
-      - "user": kullanici ayar dosyasina yazildi
+    Persist settings.
+    Returns:
+      - "config.py": written into source config file
+      - "user": written into per-user settings file
     """
     settings = sanitize_settings(settings)
     try:

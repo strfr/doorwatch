@@ -22,9 +22,10 @@ run_local_install() {
     apt_deb="/tmp/$(basename "${deb_path}")"
     install -m 0644 "${deb_path}" "${apt_deb}"
 
-    echo "Installing with apt..."
+    echo "Installing/updating with apt..."
     sudo apt-get update -qq
-    sudo apt-get install -y "${apt_deb}"
+    # Always refresh files even if package version is unchanged.
+    sudo apt-get install -y --reinstall "${apt_deb}"
     rm -f "${apt_deb}"
 
     echo

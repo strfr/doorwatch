@@ -1,4 +1,4 @@
-"""Hafif hareket algilama motoru (CuPy GPU veya CPU fallback)."""
+"""Lightweight motion detection engine (CuPy GPU or CPU fallback)."""
 
 from __future__ import annotations
 
@@ -12,26 +12,26 @@ log = logging.getLogger("doorwatch.detector")
 try:
     import cupy as cp
     CUPY_AVAILABLE = True
-except Exception:  # pragma: no cover - opsiyonel
+except Exception:  # pragma: no cover - optional
     cp = None
     CUPY_AVAILABLE = False
 
-# Geriye donuk uyumluluk (artık yüz tanıma yok).
+# Backward compatibility (face recognition removed).
 FACE_REC_AVAILABLE = False
 
 
 class PersonDetector:
     """
-    Hareket algilar, kisi/obje/yuz tanima yapmaz.
-    update() -> (onayli_hareket, kutular, hareket_var)
+    Detects motion only; no person/object/face recognition.
+    update() -> (confirmed_motion, boxes, has_motion)
     """
 
     def __init__(
         self,
-        confidence: float = 0.0,  # eski imza uyumlulugu
+        confidence: float = 0.0,  # legacy signature compatibility
         consecutive_frames: int = 2,
-        known_faces_dir: str | None = None,  # eski imza uyumlulugu
-        face_tolerance: float = 0.0,  # eski imza uyumlulugu
+        known_faces_dir: str | None = None,  # legacy signature compatibility
+        face_tolerance: float = 0.0,  # legacy signature compatibility
         min_contour_area: int = 2000,
         use_gpu: bool = True,
         max_active_ratio: float = 0.75,
@@ -93,18 +93,18 @@ class PersonDetector:
 
     def _init_subtractor(self, use_gpu: bool) -> None:
         if use_gpu:
-            # 1) Oncelik: CuPy (OpenCV CUDA derlemesi gerektirmez)
+            # 1) Preferred: CuPy (does not require OpenCV CUDA build)
             if CUPY_AVAILABLE:
                 try:
                     if cp.cuda.runtime.getDeviceCount() > 0:
                         self._use_cupy = True
                         self._bg_subtractor = "cupy"
-                        log.info("Hareket algilama GPU modunda (CuPy).")
+                        log.info("Motion detection running on GPU (CuPy).")
                         return
                 except Exception as exc:
-                    log.warning("CuPy GPU kullanilamadi, alternatifler denenecek: %s", exc)
+                    log.warning("CuPy GPU unavailable, trying fallbacks: %s", exc)
 
-            # 2) Opsiyonel: OpenCV CUDA MOG2 (varsa)
+            # 2) Optional: OpenCV CUDA MOG2 (if available)
             try:
                 cuda_ok = (
                     hasattr(cv2, "cuda")
@@ -118,10 +118,10 @@ class PersonDetector:
                     )
                     self._gpu_frame = cv2.cuda_GpuMat()
                     self._use_cuda = True
-                    log.info("Hareket algilama GPU modunda (OpenCV CUDA MOG2).")
+                    log.info("Motion detection running on GPU (OpenCV CUDA MOG2).")
                     return
             except Exception as exc:
-                log.warning("GPU hareket algilama baslatilamadi, CPU'ya dusuldu: %s", exc)
+                log.warning("Failed to initialize GPU motion detection, falling back to CPU: %s", exc)
 
         self._cpu_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
             history=500, varThreshold=50, detectShadows=True
@@ -129,7 +129,7 @@ class PersonDetector:
         self._bg_subtractor = self._cpu_bg_subtractor
         self._use_cuda = False
         self._use_cupy = False
-        log.info("Hareket algilama CPU modunda.")
+        log.info("Motion detection running on CPU.")
 
     def _detect_motion_gpu_cupy(
         self,
@@ -160,15 +160,15 @@ class PersonDetector:
         total_pixels = int(motion_mask.size)
         active_ratio = (active_pixels / total_pixels) if total_pixels else 0.0
 
-        # Tum sahnenin birden "hareketli" olmasi genelde kamera titremesi
-        # veya ani isik degisimi; bunu popup/rearm icin ignore et.
+        # If almost the whole scene becomes "active", it is usually camera shake
+        # or sudden lighting change. Ignore it for popup/rearm logic.
         if active_ratio >= self._max_active_ratio:
             fast_alpha = max(self._gpu_alpha_static, 0.20)
             self._gpu_bg = ((1.0 - fast_alpha) * self._gpu_bg) + (fast_alpha * gpu_frame)
             return False, []
 
-        # Daginik piksel gurultusunu tek buyuk kutuya donusturmeyi engellemek icin
-        # maskeyi CPU'da temizleyip contour bazli kutular cikariyoruz.
+        # Prevent sparse noisy pixels from becoming one huge box by cleaning
+        # mask on CPU and extracting contour-based boxes.
         mask_u8 = cp.asnumpy(motion_mask.astype(cp.uint8)) * 255
         kernel = np.ones((3, 3), dtype=np.uint8)
         mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel, iterations=1)
@@ -229,14 +229,14 @@ class PersonDetector:
         min_contour_area: int | None = None,
     ) -> tuple[bool, list[tuple[int, int, int, int]]]:
         """
-        Hareket var mi kontrol eder.
-        Donus: (hareket_var, kutular)
+        Checks whether motion exists.
+        Returns: (has_motion, boxes)
         """
         if self._use_cupy:
             try:
                 return self._detect_motion_gpu_cupy(frame, min_contour_area=min_contour_area)
             except Exception as exc:
-                log.warning("CuPy motion detect hatasi, CPU fallback: %s", exc)
+                log.warning("CuPy motion detection error, CPU fallback: %s", exc)
                 self._use_cupy = False
                 self._cpu_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
                     history=500, varThreshold=50, detectShadows=True
@@ -290,7 +290,7 @@ class PersonDetector:
 
         return confirmed, rects, has_motion
 
-    # Eski API uyumlulugu - bu modda yuz tanima yok.
+    # Legacy API compatibility: face recognition is disabled in this mode.
     def identify_faces(self, frame: np.ndarray) -> list[str]:
         return []
 

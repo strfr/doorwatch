@@ -1,4 +1,4 @@
-"""Sistem tepsisi ikonu."""
+"""System tray icon."""
 
 import gi
 gi.require_version("Gtk", "3.0")
@@ -21,7 +21,7 @@ log = logging.getLogger("doorwatch.tray")
 
 
 class TrayIcon:
-    """Tray menusu: Camera Window, Settings, Silent Mode, Exit."""
+    """Tray menu: Camera Window, Settings, Silent Mode, Exit."""
 
     def __init__(self, app_name: str, icon_path: str,
                  on_mute_toggle=None, on_quit=None, on_show_viewer=None,
@@ -78,7 +78,7 @@ class TrayIcon:
         menu.show_all()
         self._indicator.set_menu(menu)
         self._use_indicator = True
-        log.info("Tray: AppIndicator kullaniliyor.")
+        log.info("Tray: using AppIndicator.")
 
     def _build_status_icon(self, app_name, icon_path):
         import os
@@ -93,7 +93,7 @@ class TrayIcon:
         self._status_icon.connect("activate", self._on_viewer_clicked)
         self._status_icon.connect("popup-menu", self._on_popup_menu)
         self._use_indicator = False
-        log.info("Tray: StatusIcon fallback kullaniliyor.")
+        log.info("Tray: using StatusIcon fallback.")
 
     def _on_popup_menu(self, icon, button, event_time):
         menu = Gtk.Menu()
@@ -142,7 +142,7 @@ class TrayIcon:
             self._on_show_settings()
 
     def _on_quit_clicked(self, *_args):
-        log.info("Cikis istendi.")
+        log.info("Exit requested.")
         if self._on_quit:
             self._on_quit()
         Gtk.main_quit()

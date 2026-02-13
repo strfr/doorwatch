@@ -1,2 +1,2 @@
-# DoorWatch - Kapı Gözetleme Sistemi
+# DoorWatch package
 __version__ = "1.0.0"
