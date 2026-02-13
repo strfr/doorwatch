@@ -1,16 +1,23 @@
 # Python
 __pycache__/
 *.py[cod]
+*.so
+.python-version
+pip-wheel-metadata/
 
 # Virtual environment
 .venv/
 venv/
+.env
+.env.*
 
 # Runtime/output
 logs/
 snapshots/
 known_faces/
 dist/
+*.deb
+*.log
 nohup.out
 doorwatch/nohup.out
 
@@ -18,8 +25,12 @@ doorwatch/nohup.out
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.cache/
 
 # OS/editor
 .DS_Store
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
