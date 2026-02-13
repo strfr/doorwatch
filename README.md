@@ -2,18 +2,20 @@
 
 Lightweight tray-based motion popup monitor for Linux.
 
-## One-Line Install From GitHub
-
-After pushing this repo to GitHub, install with:
+## One-Line Install (Latest Release)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/install.sh | bash -s -- https://github.com/<owner>/<repo>.git
+curl -fsSL https://github.com/strfr/doorwatch/releases/latest/download/install.sh | bash
 ```
 
 This command:
-- clones the repository to a temporary folder
+- downloads installer script from the latest GitHub Release
+- clones repository to a temporary folder
 - builds a `.deb` package
 - installs it with `apt`
+
+Release page:
+- https://github.com/strfr/doorwatch/releases/latest
 
 ## Local Install (from source checkout)
 

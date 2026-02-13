@@ -32,16 +32,9 @@ if [ -f "${SCRIPT_DIR}/packaging/build_deb.sh" ] && [ -f "${SCRIPT_DIR}/main.py"
     exit 0
 fi
 
-REPO_URL="${1:-${DOORWATCH_REPO_URL:-}}"
-REPO_REF="${DOORWATCH_REPO_REF:-main}"
-if [ -z "${REPO_URL}" ]; then
-    echo "Remote bootstrap mode:"
-    echo "Usage: curl -fsSL <raw-install.sh-url> | bash -s -- <repo-url>"
-    echo "Example:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/install.sh | \\"
-    echo "    bash -s -- https://github.com/<owner>/<repo>.git"
-    exit 1
-fi
+DEFAULT_REPO_URL="https://github.com/strfr/doorwatch.git"
+REPO_URL="${1:-${DOORWATCH_REPO_URL:-$DEFAULT_REPO_URL}}"
+REPO_REF="${2:-${DOORWATCH_REPO_REF:-main}}"
 
 if ! command -v git >/dev/null 2>&1; then
     echo "git not found. Installing git..."
