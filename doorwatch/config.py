@@ -9,6 +9,30 @@ def _xdg_dir(env_name: str, fallback_suffix: str) -> str:
         return value
     return os.path.join(os.path.expanduser("~"), fallback_suffix)
 
+
+def _xdg_videos_dir() -> str:
+    env_value = os.environ.get("XDG_VIDEOS_DIR")
+    if env_value:
+        return os.path.expandvars(env_value.replace("$HOME", os.path.expanduser("~")))
+
+    config_home = _xdg_dir("XDG_CONFIG_HOME", ".config")
+    user_dirs_path = os.path.join(config_home, "user-dirs.dirs")
+    try:
+        with open(user_dirs_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line.startswith("XDG_VIDEOS_DIR="):
+                    continue
+                value = line.split("=", 1)[1].strip().strip('"')
+                if not value:
+                    break
+                value = value.replace("$HOME", os.path.expanduser("~"))
+                return os.path.expandvars(value)
+    except OSError:
+        pass
+
+    return os.path.join(os.path.expanduser("~"), "Videos")
+
 # Camera
 CAMERA_DEVICE = "/dev/video1"
 CAMERA_INDEX = 1
@@ -50,12 +74,15 @@ PROCESS_HEIGHT_IDLE = 360
 POPUP_DURATION_SEC = 3
 POPUP_WIDTH = 480
 POPUP_HEIGHT = 360
+# Number of recent motion clips to keep in SNAPSHOT_DIR.
+MOTION_RECORD_KEEP_COUNT = 5
 
 # Runtime output directories (must remain user-writable in packaged installs)
 _STATE_HOME = _xdg_dir("XDG_STATE_HOME", ".local/state")
 _DATA_HOME = _xdg_dir("XDG_DATA_HOME", ".local/share")
 LOG_DIR = os.path.join(_STATE_HOME, "doorwatch")
 SNAPSHOT_DIR = os.path.join(_DATA_HOME, "doorwatch", "snapshots")
+VIDEOS_DIR = _xdg_videos_dir()
 
 # Tray
 APP_NAME = "DoorWatch"

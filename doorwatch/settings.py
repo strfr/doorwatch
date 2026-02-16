@@ -63,6 +63,7 @@ class SettingsWindow(Gtk.Window):
         row = self._add_int_row(grid, row, "Popup Hold (sec)", "POPUP_DURATION_SEC", 0, 120, 1)
         row = self._add_int_row(grid, row, "Popup Width", "POPUP_WIDTH", 240, 3840, 16)
         row = self._add_int_row(grid, row, "Popup Height", "POPUP_HEIGHT", 180, 2160, 16)
+        row = self._add_int_row(grid, row, "Record History Count", "MOTION_RECORD_KEEP_COUNT", 1, 100, 1)
         row = self._add_bool_row(grid, row, "Use GPU", "MOTION_USE_GPU")
         row = self._add_bool_row(grid, row, "Preprocess Grayscale", "MOTION_PREPROCESS_GRAYSCALE")
         row = self._add_int_row(grid, row, "Median Filter Kernel", "MOTION_FILTER_MEDIAN", 0, 15, 1)

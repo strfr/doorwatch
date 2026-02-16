@@ -21,17 +21,19 @@ log = logging.getLogger("doorwatch.tray")
 
 
 class TrayIcon:
-    """Tray menu: Camera Window, Settings, Last Motion Record, Silent Mode, Exit."""
+    """Tray menu: Camera Window, Settings, Last Motion Record, Save Last Record, Silent Mode, Exit."""
 
     def __init__(self, app_name: str, icon_path: str,
                  on_mute_toggle=None, on_quit=None, on_show_viewer=None,
-                 on_show_settings=None, on_show_last_record=None):
+                 on_show_settings=None, on_show_last_record=None,
+                 on_save_last_record=None):
         self._muted = False
         self._on_mute_toggle = on_mute_toggle
         self._on_quit = on_quit
         self._on_show_viewer = on_show_viewer
         self._on_show_settings = on_show_settings
         self._on_show_last_record = on_show_last_record
+        self._on_save_last_record = on_save_last_record
 
         if INDICATOR_AVAILABLE:
             self._build_indicator(app_name, icon_path)
@@ -64,6 +66,10 @@ class TrayIcon:
         last_record_item = Gtk.MenuItem(label="Last Motion Record")
         last_record_item.connect("activate", self._on_last_record_clicked)
         menu.append(last_record_item)
+
+        save_record_item = Gtk.MenuItem(label="Save Last Record")
+        save_record_item.connect("activate", self._on_save_last_record_clicked)
+        menu.append(save_record_item)
 
         sep0 = Gtk.SeparatorMenuItem()
         menu.append(sep0)
@@ -115,6 +121,10 @@ class TrayIcon:
         last_record_item.connect("activate", self._on_last_record_clicked)
         menu.append(last_record_item)
 
+        save_record_item = Gtk.MenuItem(label="Save Last Record")
+        save_record_item.connect("activate", self._on_save_last_record_clicked)
+        menu.append(save_record_item)
+
         sep0 = Gtk.SeparatorMenuItem()
         menu.append(sep0)
 
@@ -153,6 +163,10 @@ class TrayIcon:
     def _on_last_record_clicked(self, *_args):
         if self._on_show_last_record:
             self._on_show_last_record()
+
+    def _on_save_last_record_clicked(self, *_args):
+        if self._on_save_last_record:
+            self._on_save_last_record()
 
     def _on_quit_clicked(self, *_args):
         log.info("Exit requested.")

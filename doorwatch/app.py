@@ -13,6 +13,7 @@ import os
 import logging
 import glob
 import subprocess
+import shutil
 from datetime import datetime
 
 from doorwatch import config
@@ -48,6 +49,7 @@ class DoorWatchApp:
         self._popup_motion_event_count = 0
         self._last_popup_motion_record_text = "No motion record yet."
         self._last_motion_video_path: str | None = None
+        self._motion_record_paths: list[str] = []
         self._popup_record_video_path: str | None = None
         self._popup_record_writer: cv2.VideoWriter | None = None
         self._popup_record_target_fps = 12.0
@@ -78,7 +80,9 @@ class DoorWatchApp:
             on_show_viewer=self._on_show_viewer,
             on_show_settings=self._on_show_settings,
             on_show_last_record=self._on_show_last_motion_record,
+            on_save_last_record=self._on_save_last_motion_record,
         )
+        self._refresh_motion_record_history(prune=True)
 
         log.info("DoorWatch started.")
 
@@ -192,6 +196,7 @@ class DoorWatchApp:
                 self._camera_reopen_requested = True
                 GLib.idle_add(self._viewer.resize, config.CAPTURE_WIDTH, config.CAPTURE_HEIGHT + 60)
 
+            self._refresh_motion_record_history(prune=True)
             log.info("Settings applied.")
             if storage == "config.py":
                 return True, "Settings saved (config.py) and applied."
@@ -336,11 +341,30 @@ class DoorWatchApp:
         except Exception as exc:
             log.warning("Failed to remove file %s: %s", path, exc)
 
-    def _clear_last_motion_video(self) -> None:
+    def _motion_history_limit(self) -> int:
+        try:
+            return max(1, int(config.MOTION_RECORD_KEEP_COUNT))
+        except Exception:
+            return 1
+
+    def _motion_clip_files_newest_first(self) -> list[str]:
+        pattern = os.path.join(config.SNAPSHOT_DIR, "last_motion_*.avi")
+        paths = [path for path in glob.glob(pattern) if os.path.isfile(path)]
+        paths.sort(key=os.path.getmtime, reverse=True)
+        return paths
+
+    def _refresh_motion_record_history(self, prune: bool) -> None:
+        os.makedirs(config.SNAPSHOT_DIR, exist_ok=True)
+        paths = self._motion_clip_files_newest_first()
+        if prune:
+            limit = self._motion_history_limit()
+            for old_path in paths[limit:]:
+                self._safe_remove_file(old_path)
+            paths = paths[:limit]
+
         with self._popup_record_lock:
-            old_path = self._last_motion_video_path
-            self._last_motion_video_path = None
-        self._safe_remove_file(old_path)
+            self._motion_record_paths = paths
+            self._last_motion_video_path = paths[0] if paths else None
 
     def _start_popup_video_recording(self, frame) -> None:
         try:
@@ -418,18 +442,18 @@ class DoorWatchApp:
                     log.warning("Failed to release motion clip writer: %s", exc)
 
             if keep_as_last and clip_path and frame_count > 0:
-                self._last_motion_video_path = clip_path
                 kept_path = clip_path
             else:
                 if clip_path:
                     remove_path = clip_path
-                if not keep_as_last:
-                    self._last_motion_video_path = None
 
         if remove_path:
             self._safe_remove_file(remove_path)
         if kept_path:
             log.info("Motion clip saved: %s (%d frames)", kept_path, frame_count)
+            self._refresh_motion_record_history(prune=True)
+        else:
+            self._refresh_motion_record_history(prune=False)
 
     def _popup_motion_summary_text(self) -> str:
         with self._popup_record_lock:
@@ -458,6 +482,35 @@ class DoorWatchApp:
             if self._last_motion_video_path and os.path.isfile(self._last_motion_video_path):
                 return f"{text}\nVideo file: {self._last_motion_video_path}"
             return text
+
+    def _copy_last_motion_to_videos(self) -> tuple[bool, str]:
+        with self._popup_record_lock:
+            popup_active = self._popup_active
+            src_path = self._last_motion_video_path
+
+        if popup_active:
+            return False, "Close current popup first to finalize the motion clip."
+        if not src_path or not os.path.isfile(src_path):
+            return False, "No last motion record to save."
+
+        try:
+            videos_dir = config.VIDEOS_DIR
+            os.makedirs(videos_dir, exist_ok=True)
+
+            ext = os.path.splitext(src_path)[1] or ".avi"
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base_name = f"doorwatch_saved_motion_{stamp}"
+            dst_path = os.path.join(videos_dir, f"{base_name}{ext}")
+            suffix = 1
+            while os.path.exists(dst_path):
+                dst_path = os.path.join(videos_dir, f"{base_name}_{suffix}{ext}")
+                suffix += 1
+
+            shutil.copy2(src_path, dst_path)
+            return True, dst_path
+        except Exception as exc:
+            log.exception("Failed to save last motion record: %s", exc)
+            return False, str(exc)
 
     def _camera_thread(self):
         while self._running and not self._open_camera():
@@ -574,7 +627,6 @@ class DoorWatchApp:
         # Clear previous closed record when a new popup session starts.
         with self._popup_record_lock:
             self._last_popup_motion_record_text = "No motion record yet."
-        self._clear_last_motion_video()
         self._stop_popup_video_recording(keep_as_last=False)
         self._popup_last_motion_at = time.monotonic()
         self._begin_popup_motion_record(time.time())
@@ -665,6 +717,36 @@ class DoorWatchApp:
             dialog.destroy()
         except Exception as exc:
             log.exception("Failed to open last motion record: %s", exc)
+
+    def _on_save_last_motion_record(self):
+        ok, result = self._copy_last_motion_to_videos()
+        try:
+            dialog = Gtk.MessageDialog(
+                transient_for=self._viewer if self._viewer.is_visible else None,
+                flags=Gtk.DialogFlags.MODAL,
+                message_type=Gtk.MessageType.INFO if ok else Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.OK,
+                text="Save Last Record",
+            )
+            if ok:
+                dialog.format_secondary_text(f"Saved permanently to:\n{result}")
+            else:
+                dialog.format_secondary_text(result)
+            dialog.run()
+            dialog.destroy()
+        except Exception as exc:
+            log.exception("Failed to show save-last-record dialog: %s", exc)
+
+        if ok:
+            try:
+                subprocess.Popen(
+                    ["xdg-open", os.path.dirname(result)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except Exception as exc:
+                log.warning("Failed to open videos directory: %s", exc)
 
     def _on_viewer_closed(self):
         log.debug("Camera window hidden.")
