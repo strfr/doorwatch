@@ -12,6 +12,7 @@ import time
 import os
 import logging
 import glob
+import subprocess
 from datetime import datetime
 
 from doorwatch import config
@@ -41,6 +42,17 @@ class DoorWatchApp:
         self._motion_event_latched = False
         self._no_motion_frames = 0
         self._popup_last_motion_at = 0.0
+        self._popup_record_lock = threading.RLock()
+        self._popup_motion_started_wall_at: float | None = None
+        self._popup_motion_last_seen_wall_at: float | None = None
+        self._popup_motion_event_count = 0
+        self._last_popup_motion_record_text = "No motion record yet."
+        self._last_motion_video_path: str | None = None
+        self._popup_record_video_path: str | None = None
+        self._popup_record_writer: cv2.VideoWriter | None = None
+        self._popup_record_target_fps = 12.0
+        self._popup_record_last_write_at = 0.0
+        self._popup_record_written_frames = 0
         self._last_rects: list[tuple[int, int, int, int]] = []
         self._last_detection_text = ""
         self._camera_reopen_requested = False
@@ -65,6 +77,7 @@ class DoorWatchApp:
             on_quit=self._on_quit,
             on_show_viewer=self._on_show_viewer,
             on_show_settings=self._on_show_settings,
+            on_show_last_record=self._on_show_last_motion_record,
         )
 
         log.info("DoorWatch started.")
@@ -290,6 +303,162 @@ class DoorWatchApp:
         max_area = max(w * h for _, _, w, h in rects)
         return max_area >= config.MOTION_REARM_ACTIVE_AREA
 
+    def _begin_popup_motion_record(self, wall_time: float) -> None:
+        with self._popup_record_lock:
+            self._popup_motion_started_wall_at = wall_time
+            self._popup_motion_last_seen_wall_at = wall_time
+            self._popup_motion_event_count = 1
+
+    def _touch_popup_motion_record(self, wall_time: float) -> None:
+        with self._popup_record_lock:
+            if self._popup_motion_started_wall_at is None:
+                self._popup_motion_started_wall_at = wall_time
+                self._popup_motion_last_seen_wall_at = wall_time
+                self._popup_motion_event_count = 1
+                return
+            self._popup_motion_last_seen_wall_at = wall_time
+            self._popup_motion_event_count += 1
+
+    def _clear_popup_motion_record(self) -> None:
+        with self._popup_record_lock:
+            self._popup_motion_started_wall_at = None
+            self._popup_motion_last_seen_wall_at = None
+            self._popup_motion_event_count = 0
+            self._popup_record_last_write_at = 0.0
+            self._popup_record_written_frames = 0
+
+    def _safe_remove_file(self, path: str | None) -> None:
+        if not path:
+            return
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except Exception as exc:
+            log.warning("Failed to remove file %s: %s", path, exc)
+
+    def _clear_last_motion_video(self) -> None:
+        with self._popup_record_lock:
+            old_path = self._last_motion_video_path
+            self._last_motion_video_path = None
+        self._safe_remove_file(old_path)
+
+    def _start_popup_video_recording(self, frame) -> None:
+        try:
+            os.makedirs(config.SNAPSHOT_DIR, exist_ok=True)
+            h, w = frame.shape[:2]
+            target_fps = float(min(15, max(5, int(config.CAPTURE_FPS))))
+            clip_name = f"last_motion_{datetime.now():%Y%m%d_%H%M%S}.avi"
+            clip_path = os.path.join(config.SNAPSHOT_DIR, clip_name)
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            writer = cv2.VideoWriter(clip_path, fourcc, target_fps, (w, h))
+            if not writer.isOpened():
+                writer.release()
+                log.error("Failed to start motion clip writer: %s", clip_path)
+                return
+        except Exception as exc:
+            log.exception("Failed to initialize motion clip writer: %s", exc)
+            return
+
+        with self._popup_record_lock:
+            self._popup_record_writer = writer
+            self._popup_record_video_path = clip_path
+            self._popup_record_target_fps = target_fps
+            self._popup_record_last_write_at = 0.0
+            self._popup_record_written_frames = 0
+
+        self._record_popup_frame(frame, time.monotonic())
+        log.info("Motion clip recording started: %s", clip_path)
+
+    def _record_popup_frame(self, frame, now_mono: float) -> None:
+        with self._popup_record_lock:
+            writer = self._popup_record_writer
+            if writer is None:
+                return
+
+            min_interval = 1.0 / max(1.0, self._popup_record_target_fps)
+            if self._popup_record_last_write_at > 0:
+                if (now_mono - self._popup_record_last_write_at) < min_interval:
+                    return
+
+            try:
+                writer.write(frame)
+                self._popup_record_last_write_at = now_mono
+                self._popup_record_written_frames += 1
+            except Exception as exc:
+                log.exception("Failed writing motion clip frame: %s", exc)
+                try:
+                    writer.release()
+                except Exception:
+                    pass
+                failed_path = self._popup_record_video_path
+                self._popup_record_writer = None
+                self._popup_record_video_path = None
+                self._popup_record_last_write_at = 0.0
+                self._popup_record_written_frames = 0
+                if failed_path:
+                    GLib.idle_add(self._safe_remove_file, failed_path)
+
+    def _stop_popup_video_recording(self, keep_as_last: bool) -> None:
+        remove_path: str | None = None
+        kept_path: str | None = None
+        with self._popup_record_lock:
+            writer = self._popup_record_writer
+            clip_path = self._popup_record_video_path
+            frame_count = self._popup_record_written_frames
+
+            self._popup_record_writer = None
+            self._popup_record_video_path = None
+            self._popup_record_last_write_at = 0.0
+            self._popup_record_written_frames = 0
+
+            if writer is not None:
+                try:
+                    writer.release()
+                except Exception as exc:
+                    log.warning("Failed to release motion clip writer: %s", exc)
+
+            if keep_as_last and clip_path and frame_count > 0:
+                self._last_motion_video_path = clip_path
+                kept_path = clip_path
+            else:
+                if clip_path:
+                    remove_path = clip_path
+                if not keep_as_last:
+                    self._last_motion_video_path = None
+
+        if remove_path:
+            self._safe_remove_file(remove_path)
+        if kept_path:
+            log.info("Motion clip saved: %s (%d frames)", kept_path, frame_count)
+
+    def _popup_motion_summary_text(self) -> str:
+        with self._popup_record_lock:
+            if self._popup_motion_started_wall_at is None:
+                return "Motion detected"
+
+            started = datetime.fromtimestamp(self._popup_motion_started_wall_at).strftime("%H:%M:%S")
+            if self._popup_motion_last_seen_wall_at is None:
+                last_seen = started
+            else:
+                last_seen = datetime.fromtimestamp(self._popup_motion_last_seen_wall_at).strftime("%H:%M:%S")
+            return (
+                f"Motion detected | Start: {started} | "
+                f"Last: {last_seen} | Events: {self._popup_motion_event_count}"
+            )
+
+    def _last_motion_dialog_text(self) -> str:
+        with self._popup_record_lock:
+            if self._popup_active and self._popup_motion_started_wall_at is not None:
+                return (
+                    f"Current popup record:\n{self._popup_motion_summary_text()}\n"
+                    "Video is still recording. Close popup to finalize."
+                )
+
+            text = self._last_popup_motion_record_text
+            if self._last_motion_video_path and os.path.isfile(self._last_motion_video_path):
+                return f"{text}\nVideo file: {self._last_motion_video_path}"
+            return text
+
     def _camera_thread(self):
         while self._running and not self._open_camera():
             time.sleep(2)
@@ -298,87 +467,93 @@ class DoorWatchApp:
             return
 
         while self._running:
-            if self._camera_reopen_requested:
-                self._camera_reopen_requested = False
-                self._close_camera()
-                while self._running and not self._open_camera():
-                    time.sleep(1)
-                if not self._running:
-                    break
-                continue
+            try:
+                if self._camera_reopen_requested:
+                    self._camera_reopen_requested = False
+                    self._close_camera()
+                    while self._running and not self._open_camera():
+                        time.sleep(1)
+                    if not self._running:
+                        break
+                    continue
 
-            ret, frame = self._cap.read()
-            if not ret:
-                log.warning("Frame read failed, retrying...")
-                time.sleep(0.5)
-                self._close_camera()
-                while self._running and not self._open_camera():
-                    time.sleep(2)
-                if not self._running:
-                    break
-                continue
+                ret, frame = self._cap.read()
+                if not ret:
+                    log.warning("Frame read failed, retrying...")
+                    time.sleep(0.5)
+                    self._close_camera()
+                    while self._running and not self._open_camera():
+                        time.sleep(2)
+                    if not self._running:
+                        break
+                    continue
 
-            self._frame_counter += 1
+                self._frame_counter += 1
 
-            rects = self._last_rects
-            has_motion = False
-            detection_text = self._last_detection_text
-            viewer_visible = self._viewer.is_visible
+                rects = self._last_rects
+                has_motion = False
+                detection_text = self._last_detection_text
+                viewer_visible = self._viewer.is_visible
 
-            if self._frame_counter % config.DETECTION_INTERVAL == 0:
-                proc_frame, sx, sy, min_area_proc = self._prepare_detection_frame(
-                    frame,
-                    viewer_visible=viewer_visible,
-                )
-                with self._detector_lock:
-                    confirmed, proc_rects, has_motion = self._detector.update(
-                        proc_frame,
-                        min_contour_area=min_area_proc,
+                if self._frame_counter % config.DETECTION_INTERVAL == 0:
+                    proc_frame, sx, sy, min_area_proc = self._prepare_detection_frame(
+                        frame,
+                        viewer_visible=viewer_visible,
                     )
-                rects = self._scale_rects(proc_rects, sx, sy, frame.shape)
-                significant_motion = has_motion and self._has_significant_motion(rects)
+                    with self._detector_lock:
+                        confirmed, proc_rects, has_motion = self._detector.update(
+                            proc_frame,
+                            min_contour_area=min_area_proc,
+                        )
+                    rects = self._scale_rects(proc_rects, sx, sy, frame.shape)
+                    significant_motion = has_motion and self._has_significant_motion(rects)
 
-                # Motion event latch: trigger popup once, rearm only after
-                # motion has been gone long enough.
-                if significant_motion:
-                    self._no_motion_frames = 0
-                    if self._popup_active:
-                        self._popup_last_motion_at = time.monotonic()
-                else:
-                    self._no_motion_frames += 1
-                    if self._no_motion_frames >= config.MOTION_REARM_FRAMES:
-                        self._motion_event_latched = False
+                    # Motion event latch: trigger popup once, rearm only after
+                    # motion has been gone long enough.
+                    if significant_motion:
+                        self._no_motion_frames = 0
+                        if self._popup_active:
+                            self._popup_last_motion_at = time.monotonic()
+                            self._touch_popup_motion_record(time.time())
+                    else:
+                        self._no_motion_frames += 1
+                        if self._no_motion_frames >= config.MOTION_REARM_FRAMES:
+                            self._motion_event_latched = False
 
-                if has_motion:
-                    detection_text = "Motion"
-                else:
-                    detection_text = ""
+                    if has_motion:
+                        detection_text = "Motion"
+                    else:
+                        detection_text = ""
 
-                self._last_rects = rects
-                self._last_detection_text = detection_text
+                    self._last_rects = rects
+                    self._last_detection_text = detection_text
 
-                if confirmed and significant_motion:
-                    if not self._motion_event_latched:
-                        self._motion_event_latched = True
-                        if self._muted:
-                            log.info("Motion detected, silent mode enabled. Popup not shown.")
-                        else:
-                            self._process_motion(frame)
+                    if confirmed and significant_motion:
+                        if not self._motion_event_latched:
+                            self._motion_event_latched = True
+                            if self._muted:
+                                log.info("Motion detected, silent mode enabled. Popup not shown.")
+                            else:
+                                self._process_motion(frame)
 
-            if viewer_visible:
-                status_text = "Silent Mode" if self._muted else "Running"
-                GLib.idle_add(
-                    self._viewer.update_frame,
-                    frame.copy(),
-                    rects,
-                    status_text,
-                    detection_text,
-                )
+                if viewer_visible:
+                    status_text = "Silent Mode" if self._muted else "Running"
+                    GLib.idle_add(
+                        self._viewer.update_frame,
+                        frame.copy(),
+                        rects,
+                        status_text,
+                        detection_text,
+                    )
 
-            if self._popup_active and self._current_popup:
-                GLib.idle_add(self._update_popup_frame, frame.copy())
+                if self._popup_active and self._current_popup:
+                    self._record_popup_frame(frame, time.monotonic())
+                    GLib.idle_add(self._update_popup_frame, frame.copy())
 
-            time.sleep(1.0 / config.CAPTURE_FPS)
+                time.sleep(1.0 / config.CAPTURE_FPS)
+            except Exception as exc:
+                log.exception("Unhandled error in camera loop: %s", exc)
+                time.sleep(0.2)
 
         self._close_camera()
 
@@ -396,7 +571,14 @@ class DoorWatchApp:
             return False
 
         self._popup_active = True
+        # Clear previous closed record when a new popup session starts.
+        with self._popup_record_lock:
+            self._last_popup_motion_record_text = "No motion record yet."
+        self._clear_last_motion_video()
+        self._stop_popup_video_recording(keep_as_last=False)
         self._popup_last_motion_at = time.monotonic()
+        self._begin_popup_motion_record(time.time())
+        self._start_popup_video_recording(frame)
         self._current_popup = VideoPopup(
             title="DoorWatch - Motion Detected",
             width=config.POPUP_WIDTH,
@@ -404,7 +586,7 @@ class DoorWatchApp:
             duration_sec=0,
             on_close_cb=self._on_popup_closed,
         )
-        self._current_popup.set_info_text("Motion detected")
+        self._current_popup.set_info_text(self._popup_motion_summary_text())
         self._current_popup.update_frame(frame)
         return False
 
@@ -415,14 +597,22 @@ class DoorWatchApp:
                 if no_motion_elapsed >= config.POPUP_DURATION_SEC:
                     self._current_popup.close()
                     return False
+            self._current_popup.set_info_text(self._popup_motion_summary_text())
             still_open = self._current_popup.update_frame(frame)
             if not still_open:
                 self._on_popup_closed()
         return False
 
     def _on_popup_closed(self):
+        if self._popup_motion_started_wall_at is not None:
+            record_text = self._popup_motion_summary_text()
+            with self._popup_record_lock:
+                self._last_popup_motion_record_text = record_text
+            log.info("Popup motion record: %s", record_text)
+        self._stop_popup_video_recording(keep_as_last=True)
         self._popup_active = False
         self._current_popup = None
+        self._clear_popup_motion_record()
 
     def _on_mute_toggle(self, muted: bool):
         self._muted = muted
@@ -433,6 +623,48 @@ class DoorWatchApp:
 
     def _on_show_viewer(self):
         self._viewer.toggle_visibility()
+
+    def _on_show_last_motion_record(self):
+        try:
+            with self._popup_record_lock:
+                popup_active = self._popup_active
+                clip_path = self._last_motion_video_path
+
+            if popup_active:
+                dialog = Gtk.MessageDialog(
+                    transient_for=self._viewer if self._viewer.is_visible else None,
+                    flags=Gtk.DialogFlags.MODAL,
+                    message_type=Gtk.MessageType.INFO,
+                    buttons=Gtk.ButtonsType.OK,
+                    text="Last Motion Record",
+                )
+                dialog.format_secondary_text(self._last_motion_dialog_text())
+                dialog.run()
+                dialog.destroy()
+                return
+
+            if clip_path and os.path.isfile(clip_path):
+                subprocess.Popen(
+                    ["xdg-open", clip_path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                log.info("Opening last motion clip: %s", clip_path)
+                return
+
+            dialog = Gtk.MessageDialog(
+                transient_for=self._viewer if self._viewer.is_visible else None,
+                flags=Gtk.DialogFlags.MODAL,
+                message_type=Gtk.MessageType.INFO,
+                buttons=Gtk.ButtonsType.OK,
+                text="Last Motion Record",
+            )
+            dialog.format_secondary_text(self._last_motion_dialog_text())
+            dialog.run()
+            dialog.destroy()
+        except Exception as exc:
+            log.exception("Failed to open last motion record: %s", exc)
 
     def _on_viewer_closed(self):
         log.debug("Camera window hidden.")
