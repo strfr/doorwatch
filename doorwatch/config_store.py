@@ -19,6 +19,11 @@ SETTING_KEYS = [
     "DETECTION_INTERVAL",
     "MIN_CONTOUR_AREA",
     "MOTION_USE_GPU",
+    "MOTION_SUBTRACTOR_TYPE",
+    "MOTION_SHADOW_THRESHOLD",
+    "MOTION_LIGHTING_LUMA_DELTA",
+    "MOTION_LIGHTING_ACTIVE_RATIO",
+    "MOTION_LIGHTING_MAX_BLOB_RATIO",
     "MOTION_PREPROCESS_GRAYSCALE",
     "MOTION_FILTER_MEDIAN",
     "MOTION_FILTER_GAUSSIAN",
@@ -34,17 +39,17 @@ SETTING_KEYS = [
 ]
 
 
-def current_settings() -> dict[str, int | float | bool]:
+def current_settings() -> dict[str, int | float | bool | str]:
     return {key: getattr(config, key) for key in SETTING_KEYS}
 
 
-def apply_runtime(settings: dict[str, int | float | bool]) -> None:
+def apply_runtime(settings: dict[str, int | float | bool | str]) -> None:
     for key, value in sanitize_settings(settings).items():
         if key in SETTING_KEYS:
             setattr(config, key, value)
 
 
-def save_to_file(settings: dict[str, int | float | bool]) -> None:
+def save_to_file(settings: dict[str, int | float | bool | str]) -> None:
     settings = sanitize_settings(settings)
     path = Path(config.__file__).resolve()
     text = path.read_text(encoding="utf-8")
@@ -79,9 +84,11 @@ def save_to_file(settings: dict[str, int | float | bool]) -> None:
     path.write_text("".join(out), encoding="utf-8")
 
 
-def _format_value(value: int | float | bool) -> str:
+def _format_value(value: int | float | bool | str) -> str:
     if isinstance(value, bool):
         return "True" if value else "False"
+    if isinstance(value, str):
+        return repr(value)
     if isinstance(value, float):
         return f"{value:.4f}".rstrip("0").rstrip(".")
     return str(int(value))
@@ -94,7 +101,7 @@ def user_settings_path() -> Path:
     return Path.home() / ".config" / "doorwatch" / "settings.json"
 
 
-def load_user_settings() -> dict[str, int | float | bool]:
+def load_user_settings() -> dict[str, int | float | bool | str]:
     path = user_settings_path()
     if not path.is_file():
         return {}
@@ -107,14 +114,14 @@ def load_user_settings() -> dict[str, int | float | bool]:
         return {}
 
 
-def save_user_settings(settings: dict[str, int | float | bool]) -> None:
+def save_user_settings(settings: dict[str, int | float | bool | str]) -> None:
     path = user_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     data = sanitize_settings(settings)
     path.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
 
 
-def persist_settings(settings: dict[str, int | float | bool]) -> str:
+def persist_settings(settings: dict[str, int | float | bool | str]) -> str:
     """
     Persist settings.
     Returns:
@@ -130,8 +137,8 @@ def persist_settings(settings: dict[str, int | float | bool]) -> str:
         return "user"
 
 
-def sanitize_settings(settings: dict[str, int | float | bool]) -> dict[str, int | float | bool]:
-    out: dict[str, int | float | bool] = {}
+def sanitize_settings(settings: dict[str, int | float | bool | str]) -> dict[str, int | float | bool | str]:
+    out: dict[str, int | float | bool | str] = {}
     defaults = current_settings()
     for key in SETTING_KEYS:
         if key not in settings:
@@ -140,6 +147,12 @@ def sanitize_settings(settings: dict[str, int | float | bool]) -> dict[str, int 
         default_value = defaults[key]
         if isinstance(default_value, bool):
             out[key] = bool(value)
+        elif isinstance(default_value, str):
+            normalized = str(value).strip().upper()
+            if key == "MOTION_SUBTRACTOR_TYPE":
+                out[key] = normalized if normalized in {"KNN", "MOG2"} else str(default_value).upper()
+            else:
+                out[key] = normalized
         elif isinstance(default_value, int):
             out[key] = int(value)
         else:

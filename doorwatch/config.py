@@ -55,8 +55,19 @@ MOTION_USE_GPU = True
 # Processing-stage grayscale + filtering (detection path only).
 # Popup and camera window always show original color frames.
 MOTION_PREPROCESS_GRAYSCALE = True
-MOTION_FILTER_MEDIAN = 3
-MOTION_FILTER_GAUSSIAN = 5
+MOTION_FILTER_MEDIAN = 5
+MOTION_FILTER_GAUSSIAN = 7
+# Motion detection backend:
+# "KNN" is generally more robust for sunlight / shadow changes.
+MOTION_SUBTRACTOR_TYPE = "KNN"
+# Background subtractor shadow pixels are typically 127.
+# Threshold at/above 200 suppresses most shadow-only motion.
+MOTION_SHADOW_THRESHOLD = 200
+# If luminance jumps and a large part of the frame changes at once,
+# treat it as lighting change (e.g. sun cloud transitions), not motion.
+MOTION_LIGHTING_LUMA_DELTA = 8.0
+MOTION_LIGHTING_ACTIVE_RATIO = 0.20
+MOTION_LIGHTING_MAX_BLOB_RATIO = 0.15
 # Number of no-motion frames required to rearm after a popup
 MOTION_REARM_FRAMES = 3
 # Minimum "significant motion" area for rearm/trigger logic.

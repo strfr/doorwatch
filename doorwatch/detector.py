@@ -1,4 +1,4 @@
-"""Lightweight motion detection engine (CuPy GPU or CPU fallback)."""
+"""Lightweight motion detection engine (OpenCV subtractor + optional GPU)."""
 
 from __future__ import annotations
 
@@ -38,6 +38,12 @@ class PersonDetector:
         preprocess_grayscale: bool = True,
         filter_median: int = 3,
         filter_gaussian: int = 5,
+        subtractor_type: str = "KNN",
+        shadow_threshold: int = 200,
+        lighting_luma_delta: float = 8.0,
+        lighting_active_ratio: float = 0.20,
+        lighting_blob_ratio: float = 0.15,
+        library_only: bool = True,
         release_frames: int = 6,
         **_kwargs,
     ):
@@ -51,6 +57,13 @@ class PersonDetector:
         self._preprocess_grayscale = bool(preprocess_grayscale)
         self._filter_median = self._normalize_kernel(filter_median)
         self._filter_gaussian = self._normalize_kernel(filter_gaussian)
+        self._subtractor_type = str(subtractor_type).strip().upper() or "KNN"
+        self._shadow_threshold = int(np.clip(shadow_threshold, 128, 255))
+        self._lighting_luma_delta = float(max(1.0, lighting_luma_delta))
+        self._lighting_active_ratio = float(np.clip(lighting_active_ratio, 0.01, 0.98))
+        self._lighting_blob_ratio = float(np.clip(lighting_blob_ratio, 0.01, 0.98))
+        self._library_only = bool(library_only)
+        self._last_luma_mean: float | None = None
 
         self._use_cupy = False
         self._use_cuda = False
@@ -66,6 +79,9 @@ class PersonDetector:
         self._gpu_min_pixels = max(64, int(self._min_contour_area * 0.05))
 
         self._bg_subtractor = None
+        self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        self._kernel_open = np.ones((3, 3), dtype=np.uint8)
+        self._kernel_close = np.ones((5, 5), dtype=np.uint8)
         self._init_subtractor(use_gpu=use_gpu)
 
     @staticmethod
@@ -82,6 +98,7 @@ class PersonDetector:
 
         if self._preprocess_grayscale and proc.ndim == 3:
             proc = cv2.cvtColor(proc, cv2.COLOR_BGR2GRAY)
+            proc = self._clahe.apply(proc)
 
         if self._filter_median:
             proc = cv2.medianBlur(proc, self._filter_median)
@@ -91,20 +108,88 @@ class PersonDetector:
 
         return proc
 
+    def _create_cpu_subtractor(self):
+        if self._subtractor_type == "MOG2":
+            log.info("Motion detection using OpenCV MOG2 (CPU).")
+            return cv2.createBackgroundSubtractorMOG2(
+                history=700,
+                varThreshold=36,
+                detectShadows=True,
+            )
+
+        if hasattr(cv2, "createBackgroundSubtractorKNN"):
+            log.info("Motion detection using OpenCV KNN (CPU).")
+            return cv2.createBackgroundSubtractorKNN(
+                history=700,
+                dist2Threshold=1000.0,
+                detectShadows=True,
+            )
+
+        log.info("OpenCV KNN unavailable, using MOG2 (CPU).")
+        return cv2.createBackgroundSubtractorMOG2(
+            history=700,
+            varThreshold=36,
+            detectShadows=True,
+        )
+
+    def _frame_luma_delta(self, frame: np.ndarray) -> float:
+        if frame.ndim == 3:
+            luma = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        else:
+            luma = frame
+
+        current = float(np.mean(luma))
+        if self._last_luma_mean is None:
+            self._last_luma_mean = current
+            return 0.0
+
+        delta = abs(current - self._last_luma_mean)
+        self._last_luma_mean = current
+        return delta
+
+    def _extract_rects_from_mask(
+        self,
+        fg_mask: np.ndarray,
+        min_area: int,
+        luma_delta: float,
+    ) -> tuple[bool, list[tuple[int, int, int, int]]]:
+        fg_mask = cv2.threshold(fg_mask, self._shadow_threshold, 255, cv2.THRESH_BINARY)[1]
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, self._kernel_open, iterations=1)
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, self._kernel_close, iterations=1)
+
+        total_pixels = float(fg_mask.shape[0] * fg_mask.shape[1])
+        active_pixels = float(cv2.countNonZero(fg_mask))
+        active_ratio = (active_pixels / total_pixels) if total_pixels else 0.0
+        if active_ratio >= self._max_active_ratio:
+            return False, []
+
+        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            largest_blob_ratio = max(cv2.contourArea(c) for c in contours) / total_pixels
+        else:
+            largest_blob_ratio = 0.0
+
+        # Sun/cloud driven brightness shifts typically cause broad frame updates
+        # in the same frame window. Suppress those as non-object motion.
+        if (
+            luma_delta >= self._lighting_luma_delta
+            and active_ratio >= self._lighting_active_ratio
+            and largest_blob_ratio >= self._lighting_blob_ratio
+        ):
+            return False, []
+
+        rects: list[tuple[int, int, int, int]] = []
+        for contour in contours:
+            if cv2.contourArea(contour) < min_area:
+                continue
+            x, y, w, h = cv2.boundingRect(contour)
+            rects.append((x, y, w, h))
+
+        return len(rects) > 0, rects
+
     def _init_subtractor(self, use_gpu: bool) -> None:
         if use_gpu:
-            # 1) Preferred: CuPy (does not require OpenCV CUDA build)
-            if CUPY_AVAILABLE:
-                try:
-                    if cp.cuda.runtime.getDeviceCount() > 0:
-                        self._use_cupy = True
-                        self._bg_subtractor = "cupy"
-                        log.info("Motion detection running on GPU (CuPy).")
-                        return
-                except Exception as exc:
-                    log.warning("CuPy GPU unavailable, trying fallbacks: %s", exc)
-
-            # 2) Optional: OpenCV CUDA MOG2 (if available)
+            # Prefer OpenCV subtractor backends to better filter sunlight/shadow motion.
             try:
                 cuda_ok = (
                     hasattr(cv2, "cuda")
@@ -123,13 +208,21 @@ class PersonDetector:
             except Exception as exc:
                 log.warning("Failed to initialize GPU motion detection, falling back to CPU: %s", exc)
 
-        self._cpu_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=500, varThreshold=50, detectShadows=True
-        )
+        if use_gpu and (not self._library_only) and CUPY_AVAILABLE:
+            try:
+                if cp.cuda.runtime.getDeviceCount() > 0:
+                    self._use_cupy = True
+                    self._bg_subtractor = "cupy"
+                    log.info("Motion detection running on GPU (CuPy).")
+                    return
+            except Exception as exc:
+                log.warning("CuPy GPU unavailable, falling back to CPU: %s", exc)
+
+        self._cpu_bg_subtractor = self._create_cpu_subtractor()
         self._bg_subtractor = self._cpu_bg_subtractor
         self._use_cuda = False
         self._use_cupy = False
-        log.info("Motion detection running on CPU.")
+        log.info("Motion detection running on CPU subtractor backend.")
 
     def _detect_motion_gpu_cupy(
         self,
@@ -205,23 +298,13 @@ class PersonDetector:
     ) -> tuple[bool, list[tuple[int, int, int, int]]]:
         min_area = self._min_contour_area if min_contour_area is None else int(min_contour_area)
         proc = self._prepare_motion_frame(frame)
+        luma_delta = self._frame_luma_delta(frame)
         fg_mask = self._cpu_bg_subtractor.apply(proc)
-        fg_mask = cv2.threshold(fg_mask, 120, 255, cv2.THRESH_BINARY)[1]
-        fg_mask = cv2.dilate(fg_mask, None, iterations=2)
-        fg_mask = cv2.erode(fg_mask, None, iterations=1)
-        active_ratio = cv2.countNonZero(fg_mask) / float(fg_mask.shape[0] * fg_mask.shape[1])
-
-        if active_ratio >= self._max_active_ratio:
-            return False, []
-
-        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        rects: list[tuple[int, int, int, int]] = []
-        for contour in contours:
-            if cv2.contourArea(contour) < min_area:
-                continue
-            x, y, w, h = cv2.boundingRect(contour)
-            rects.append((x, y, w, h))
-        return len(rects) > 0, rects
+        return self._extract_rects_from_mask(
+            fg_mask,
+            min_area=min_area,
+            luma_delta=luma_delta,
+        )
 
     def detect_motion(
         self,
@@ -238,9 +321,7 @@ class PersonDetector:
             except Exception as exc:
                 log.warning("CuPy motion detection error, CPU fallback: %s", exc)
                 self._use_cupy = False
-                self._cpu_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-                    history=500, varThreshold=50, detectShadows=True
-                )
+                self._cpu_bg_subtractor = self._create_cpu_subtractor()
                 return self._detect_motion_cpu(frame, min_contour_area=min_contour_area)
 
         if self._use_cuda:
@@ -248,21 +329,13 @@ class PersonDetector:
             self._gpu_frame.upload(proc)
             self._gpu_mask = self._bg_subtractor.apply(self._gpu_frame)
             fg_mask = self._gpu_mask.download()
-            fg_mask = cv2.threshold(fg_mask, 120, 255, cv2.THRESH_BINARY)[1]
-            fg_mask = cv2.dilate(fg_mask, None, iterations=2)
-            fg_mask = cv2.erode(fg_mask, None, iterations=1)
-            active_ratio = cv2.countNonZero(fg_mask) / float(fg_mask.shape[0] * fg_mask.shape[1])
-            if active_ratio >= self._max_active_ratio:
-                return False, []
-            contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            rects: list[tuple[int, int, int, int]] = []
             min_area = self._min_contour_area if min_contour_area is None else int(min_contour_area)
-            for contour in contours:
-                if cv2.contourArea(contour) < min_area:
-                    continue
-                x, y, w, h = cv2.boundingRect(contour)
-                rects.append((x, y, w, h))
-            return len(rects) > 0, rects
+            luma_delta = self._frame_luma_delta(frame)
+            return self._extract_rects_from_mask(
+                fg_mask,
+                min_area=min_area,
+                luma_delta=luma_delta,
+            )
 
         return self._detect_motion_cpu(frame, min_contour_area=min_contour_area)
 
@@ -306,3 +379,4 @@ class PersonDetector:
     def reset(self) -> None:
         self._history.clear()
         self._quiet_frames = 0
+        self._last_luma_mean = None

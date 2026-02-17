@@ -12,14 +12,14 @@ class SettingsWindow(Gtk.Window):
 
     def __init__(
         self,
-        settings: dict[str, int | float | bool],
+        settings: dict[str, int | float | bool | str],
         camera_indices: list[int],
         autostart_enabled: bool,
         on_save_cb,
         on_refresh_cameras_cb,
     ):
         super().__init__(title="DoorWatch - Settings")
-        self.set_default_size(520, 740)
+        self.set_default_size(520, 860)
         self.set_position(Gtk.WindowPosition.CENTER)
 
         self._settings = dict(settings)
@@ -65,9 +65,39 @@ class SettingsWindow(Gtk.Window):
         row = self._add_int_row(grid, row, "Popup Height", "POPUP_HEIGHT", 180, 2160, 16)
         row = self._add_int_row(grid, row, "Record History Count", "MOTION_RECORD_KEEP_COUNT", 1, 100, 1)
         row = self._add_bool_row(grid, row, "Use GPU", "MOTION_USE_GPU")
+        row = self._add_choice_row(
+            grid,
+            row,
+            "Subtractor Type",
+            "MOTION_SUBTRACTOR_TYPE",
+            options=["KNN", "MOG2"],
+            default="KNN",
+        )
         row = self._add_bool_row(grid, row, "Preprocess Grayscale", "MOTION_PREPROCESS_GRAYSCALE")
         row = self._add_int_row(grid, row, "Median Filter Kernel", "MOTION_FILTER_MEDIAN", 0, 15, 1)
         row = self._add_int_row(grid, row, "Gaussian Filter Kernel", "MOTION_FILTER_GAUSSIAN", 0, 15, 1)
+        row = self._add_int_row(grid, row, "Shadow Threshold", "MOTION_SHADOW_THRESHOLD", 128, 255, 1)
+        row = self._add_float_row(grid, row, "Lighting Luma Delta", "MOTION_LIGHTING_LUMA_DELTA", 1.0, 50.0, 0.5, 1)
+        row = self._add_float_row(
+            grid,
+            row,
+            "Lighting Active Ratio",
+            "MOTION_LIGHTING_ACTIVE_RATIO",
+            0.01,
+            0.98,
+            0.01,
+            2,
+        )
+        row = self._add_float_row(
+            grid,
+            row,
+            "Lighting Max Blob Ratio",
+            "MOTION_LIGHTING_MAX_BLOB_RATIO",
+            0.01,
+            0.98,
+            0.01,
+            2,
+        )
 
         self._status_label = Gtk.Label(label="")
         self._status_label.set_xalign(0.0)
@@ -149,6 +179,32 @@ class SettingsWindow(Gtk.Window):
         self._bool_widgets[key] = check
         return row + 1
 
+    def _add_choice_row(
+        self,
+        grid: Gtk.Grid,
+        row: int,
+        label: str,
+        key: str,
+        options: list[str],
+        default: str,
+    ) -> int:
+        lbl = Gtk.Label(label=label)
+        lbl.set_xalign(0.0)
+        grid.attach(lbl, 0, row, 1, 1)
+
+        combo = Gtk.ComboBoxText()
+        current = str(self._settings.get(key, default)).strip().upper()
+        active_idx = 0
+        normalized = [str(opt).strip().upper() for opt in options]
+        for i, opt in enumerate(normalized):
+            combo.append_text(opt)
+            if opt == current:
+                active_idx = i
+        combo.set_active(active_idx)
+        grid.attach(combo, 1, row, 1, 1)
+        setattr(self, f"_{key}_combo", combo)
+        return row + 1
+
     def _populate_camera_combo(self, camera_indices: list[int]) -> None:
         self._camera_combo.remove_all()
         current = int(self._settings.get("CAMERA_INDEX", 0))
@@ -172,8 +228,8 @@ class SettingsWindow(Gtk.Window):
         except Exception as exc:
             self._status_label.set_text(f"Failed to refresh camera list: {exc}")
 
-    def _collect_settings(self) -> dict[str, int | float | bool]:
-        out: dict[str, int | float | bool] = {}
+    def _collect_settings(self) -> dict[str, int | float | bool | str]:
+        out: dict[str, int | float | bool | str] = {}
         camera_text = self._camera_combo.get_active_text()
         out["CAMERA_INDEX"] = int(camera_text) if camera_text is not None else 0
 
@@ -190,6 +246,12 @@ class SettingsWindow(Gtk.Window):
             if key == "AUTOSTART_ENABLED":
                 continue
             out[key] = bool(widget.get_active())
+
+        subtractor_combo = getattr(self, "_MOTION_SUBTRACTOR_TYPE_combo", None)
+        subtractor_value = subtractor_combo.get_active_text() if subtractor_combo else None
+        out["MOTION_SUBTRACTOR_TYPE"] = (
+            str(subtractor_value).strip().upper() if subtractor_value is not None else "KNN"
+        )
 
         return out
 

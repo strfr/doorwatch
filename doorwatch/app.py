@@ -95,6 +95,11 @@ class DoorWatchApp:
             preprocess_grayscale=config.MOTION_PREPROCESS_GRAYSCALE,
             filter_median=config.MOTION_FILTER_MEDIAN,
             filter_gaussian=config.MOTION_FILTER_GAUSSIAN,
+            subtractor_type=config.MOTION_SUBTRACTOR_TYPE,
+            shadow_threshold=config.MOTION_SHADOW_THRESHOLD,
+            lighting_luma_delta=config.MOTION_LIGHTING_LUMA_DELTA,
+            lighting_active_ratio=config.MOTION_LIGHTING_ACTIVE_RATIO,
+            lighting_blob_ratio=config.MOTION_LIGHTING_MAX_BLOB_RATIO,
         )
 
     def _setup_logging(self):
@@ -148,7 +153,7 @@ class DoorWatchApp:
 
     def _on_settings_apply(
         self,
-        settings: dict[str, int | float | bool],
+        settings: dict[str, int | float | bool | str],
         startup_enabled: bool,
     ) -> tuple[bool, str]:
         try:
@@ -162,6 +167,11 @@ class DoorWatchApp:
                 config.DETECTION_FRAME_COUNT,
                 config.MIN_CONTOUR_AREA,
                 config.MOTION_USE_GPU,
+                config.MOTION_SUBTRACTOR_TYPE,
+                config.MOTION_SHADOW_THRESHOLD,
+                config.MOTION_LIGHTING_LUMA_DELTA,
+                config.MOTION_LIGHTING_ACTIVE_RATIO,
+                config.MOTION_LIGHTING_MAX_BLOB_RATIO,
                 config.MOTION_MAX_ACTIVE_RATIO,
                 config.MOTION_PREPROCESS_GRAYSCALE,
                 config.MOTION_FILTER_MEDIAN,
@@ -177,6 +187,11 @@ class DoorWatchApp:
                     config.DETECTION_FRAME_COUNT,
                     config.MIN_CONTOUR_AREA,
                     config.MOTION_USE_GPU,
+                    config.MOTION_SUBTRACTOR_TYPE,
+                    config.MOTION_SHADOW_THRESHOLD,
+                    config.MOTION_LIGHTING_LUMA_DELTA,
+                    config.MOTION_LIGHTING_ACTIVE_RATIO,
+                    config.MOTION_LIGHTING_MAX_BLOB_RATIO,
                     config.MOTION_MAX_ACTIVE_RATIO,
                     config.MOTION_PREPROCESS_GRAYSCALE,
                     config.MOTION_FILTER_MEDIAN,
