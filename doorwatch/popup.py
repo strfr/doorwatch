@@ -24,6 +24,9 @@ class VideoPopup(Gtk.Window):
         width: int = 480,
         height: int = 360,
         duration_sec: int = 3,
+        monitor_index: int = -1,
+        anchor: str = "BOTTOM_RIGHT",
+        edge_margin: int = 24,
         on_close_cb=None,
     ):
         super().__init__(title=title)
@@ -34,13 +37,17 @@ class VideoPopup(Gtk.Window):
         self.set_type_hint(Gdk.WindowTypeHint.DIALOG)
         self._window_width = int(width)
         self._window_height = int(height)
-        self._edge_margin = 24
+        self._monitor_index = int(monitor_index)
+        self._anchor = self._normalize_anchor(anchor)
+        self._edge_margin = max(0, int(edge_margin))
 
         # duration_sec <= 0 disables auto-close (motion-based control from app).
         self._duration = max(0, int(duration_sec))
         self._start_time = time.monotonic()
         self._on_close_cb = on_close_cb
         self._closed = False
+        self._close_notified = False
+        self._close_reason = "unknown"
         self._info_text = "Motion detected!"
 
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -64,27 +71,39 @@ class VideoPopup(Gtk.Window):
 
         vbox.pack_start(btn_box, False, False, 0)
 
+        self.connect("delete-event", self._on_delete_event)
         self.connect("destroy", self._on_destroy)
         self.connect("realize", self._on_realize)
         self.show_all()
 
     def _on_realize(self, *_args):
-        self._move_to_second_monitor_bottom_right()
+        self._move_to_configured_position()
 
-    def _move_to_second_monitor_bottom_right(self):
+    @staticmethod
+    def _normalize_anchor(anchor: str) -> str:
+        value = str(anchor).strip().upper()
+        allowed = {"TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT", "CENTER"}
+        return value if value in allowed else "BOTTOM_RIGHT"
+
+    def _select_monitor(self, display: Gdk.Display):
+        monitor_count = display.get_n_monitors()
+        if monitor_count <= 0:
+            return None
+
+        if self._monitor_index >= 0:
+            idx = min(self._monitor_index, monitor_count - 1)
+            return display.get_monitor(idx)
+
+        if monitor_count > 1:
+            return display.get_monitor(1)
+        return display.get_primary_monitor() or display.get_monitor(0)
+
+    def _move_to_configured_position(self):
         display = Gdk.Display.get_default()
         if display is None:
             return
 
-        monitor_count = display.get_n_monitors()
-        if monitor_count <= 0:
-            return
-
-        if monitor_count > 1:
-            monitor = display.get_monitor(1)
-        else:
-            monitor = display.get_primary_monitor() or display.get_monitor(0)
-
+        monitor = self._select_monitor(display)
         if monitor is None:
             return
 
@@ -94,10 +113,27 @@ class VideoPopup(Gtk.Window):
             win_w = self._window_width
             win_h = self._window_height
 
-        x = geom.x + geom.width - win_w - self._edge_margin
-        y = geom.y + geom.height - win_h - self._edge_margin
-        x = max(geom.x, x)
-        y = max(geom.y, y)
+        max_x = geom.x + max(0, geom.width - win_w)
+        max_y = geom.y + max(0, geom.height - win_h)
+
+        if self._anchor == "TOP_LEFT":
+            x = geom.x + self._edge_margin
+            y = geom.y + self._edge_margin
+        elif self._anchor == "TOP_RIGHT":
+            x = geom.x + geom.width - win_w - self._edge_margin
+            y = geom.y + self._edge_margin
+        elif self._anchor == "BOTTOM_LEFT":
+            x = geom.x + self._edge_margin
+            y = geom.y + geom.height - win_h - self._edge_margin
+        elif self._anchor == "CENTER":
+            x = geom.x + (geom.width - win_w) // 2
+            y = geom.y + (geom.height - win_h) // 2
+        else:  # BOTTOM_RIGHT
+            x = geom.x + geom.width - win_w - self._edge_margin
+            y = geom.y + geom.height - win_h - self._edge_margin
+
+        x = max(geom.x, min(int(x), int(max_x)))
+        y = max(geom.y, min(int(y), int(max_y)))
         self.move(x, y)
 
     def update_frame(self, frame: np.ndarray) -> bool:
@@ -140,20 +176,37 @@ class VideoPopup(Gtk.Window):
         self._info_text = text
 
     def _on_dismiss(self, *_args):
-        self._close()
+        self._close(reason="user")
+
+    def _on_delete_event(self, *_args):
+        self._close(reason="user")
+        return True
 
     def _on_destroy(self, *_args):
         self._closed = True
+        self._notify_close_once(self._close_reason)
 
-    def _close(self):
+    def _notify_close_once(self, reason: str) -> None:
+        if self._close_notified:
+            return
+        self._close_notified = True
+        if self._on_close_cb is None:
+            return
+        try:
+            self._on_close_cb(reason)
+        except TypeError:
+            # Backward compatible callback signature.
+            self._on_close_cb()
+
+    def _close(self, reason: str = "auto"):
         if not self._closed:
+            self._close_reason = reason
             self._closed = True
-            if self._on_close_cb:
-                self._on_close_cb()
+            self._notify_close_once(reason)
             self.destroy()
 
     def close(self):
-        self._close()
+        self._close(reason="auto")
 
     @property
     def is_closed(self) -> bool:

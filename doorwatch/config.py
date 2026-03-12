@@ -50,23 +50,23 @@ DETECTION_INTERVAL = 12
 # Main sensitivity knob:
 # Lower = more sensitive (more false positives)
 # Higher = more selective
-MIN_CONTOUR_AREA = 2000
+MIN_CONTOUR_AREA = 3000
 MOTION_USE_GPU = True
 # Processing-stage grayscale + filtering (detection path only).
 # Popup and camera window always show original color frames.
 MOTION_PREPROCESS_GRAYSCALE = True
-MOTION_FILTER_MEDIAN = 5
-MOTION_FILTER_GAUSSIAN = 7
+MOTION_FILTER_MEDIAN = 3
+MOTION_FILTER_GAUSSIAN = 5
 # Motion detection backend:
 # "KNN" is generally more robust for sunlight / shadow changes.
-MOTION_SUBTRACTOR_TYPE = "KNN"
+MOTION_SUBTRACTOR_TYPE = 'KNN'
 # Background subtractor shadow pixels are typically 127.
 # Threshold at/above 200 suppresses most shadow-only motion.
 MOTION_SHADOW_THRESHOLD = 200
 # If luminance jumps and a large part of the frame changes at once,
 # treat it as lighting change (e.g. sun cloud transitions), not motion.
-MOTION_LIGHTING_LUMA_DELTA = 8.0
-MOTION_LIGHTING_ACTIVE_RATIO = 0.20
+MOTION_LIGHTING_LUMA_DELTA = 8
+MOTION_LIGHTING_ACTIVE_RATIO = 0.2
 MOTION_LIGHTING_MAX_BLOB_RATIO = 0.15
 # Number of no-motion frames required to rearm after a popup
 MOTION_REARM_FRAMES = 3
@@ -85,8 +85,17 @@ PROCESS_HEIGHT_IDLE = 360
 POPUP_DURATION_SEC = 3
 POPUP_WIDTH = 480
 POPUP_HEIGHT = 360
+# Popup screen selection:
+# -1 => auto (2nd monitor if available, otherwise primary monitor)
+#  0+ => explicit monitor index
+POPUP_MONITOR_INDEX = -1
+# Popup anchor location on selected monitor.
+# Allowed: TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, CENTER
+POPUP_POSITION = 'BOTTOM_RIGHT'
+# Distance from screen edge in pixels for edge anchors.
+POPUP_EDGE_MARGIN = 24
 # Number of recent motion clips to keep in SNAPSHOT_DIR.
-MOTION_RECORD_KEEP_COUNT = 5
+MOTION_RECORD_KEEP_COUNT = 12
 
 # Runtime output directories (must remain user-writable in packaged installs)
 _STATE_HOME = _xdg_dir("XDG_STATE_HOME", ".local/state")

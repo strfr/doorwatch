@@ -35,6 +35,9 @@ SETTING_KEYS = [
     "POPUP_DURATION_SEC",
     "POPUP_WIDTH",
     "POPUP_HEIGHT",
+    "POPUP_MONITOR_INDEX",
+    "POPUP_POSITION",
+    "POPUP_EDGE_MARGIN",
     "MOTION_RECORD_KEEP_COUNT",
 ]
 
@@ -151,6 +154,9 @@ def sanitize_settings(settings: dict[str, int | float | bool | str]) -> dict[str
             normalized = str(value).strip().upper()
             if key == "MOTION_SUBTRACTOR_TYPE":
                 out[key] = normalized if normalized in {"KNN", "MOG2"} else str(default_value).upper()
+            elif key == "POPUP_POSITION":
+                allowed = {"TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT", "CENTER"}
+                out[key] = normalized if normalized in allowed else str(default_value).upper()
             else:
                 out[key] = normalized
         elif isinstance(default_value, int):

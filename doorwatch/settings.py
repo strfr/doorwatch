@@ -19,7 +19,7 @@ class SettingsWindow(Gtk.Window):
         on_refresh_cameras_cb,
     ):
         super().__init__(title="DoorWatch - Settings")
-        self.set_default_size(520, 860)
+        self.set_default_size(520, 920)
         self.set_position(Gtk.WindowPosition.CENTER)
 
         self._settings = dict(settings)
@@ -63,6 +63,16 @@ class SettingsWindow(Gtk.Window):
         row = self._add_int_row(grid, row, "Popup Hold (sec)", "POPUP_DURATION_SEC", 0, 120, 1)
         row = self._add_int_row(grid, row, "Popup Width", "POPUP_WIDTH", 240, 3840, 16)
         row = self._add_int_row(grid, row, "Popup Height", "POPUP_HEIGHT", 180, 2160, 16)
+        row = self._add_int_row(grid, row, "Popup Monitor Index", "POPUP_MONITOR_INDEX", -1, 16, 1)
+        row = self._add_choice_row(
+            grid,
+            row,
+            "Popup Position",
+            "POPUP_POSITION",
+            options=["TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT", "CENTER"],
+            default="BOTTOM_RIGHT",
+        )
+        row = self._add_int_row(grid, row, "Popup Edge Margin", "POPUP_EDGE_MARGIN", 0, 200, 1)
         row = self._add_int_row(grid, row, "Record History Count", "MOTION_RECORD_KEEP_COUNT", 1, 100, 1)
         row = self._add_bool_row(grid, row, "Use GPU", "MOTION_USE_GPU")
         row = self._add_choice_row(
@@ -251,6 +261,11 @@ class SettingsWindow(Gtk.Window):
         subtractor_value = subtractor_combo.get_active_text() if subtractor_combo else None
         out["MOTION_SUBTRACTOR_TYPE"] = (
             str(subtractor_value).strip().upper() if subtractor_value is not None else "KNN"
+        )
+        popup_position_combo = getattr(self, "_POPUP_POSITION_combo", None)
+        popup_position_value = popup_position_combo.get_active_text() if popup_position_combo else None
+        out["POPUP_POSITION"] = (
+            str(popup_position_value).strip().upper() if popup_position_value is not None else "BOTTOM_RIGHT"
         )
 
         return out

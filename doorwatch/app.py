@@ -651,6 +651,9 @@ class DoorWatchApp:
             width=config.POPUP_WIDTH,
             height=config.POPUP_HEIGHT,
             duration_sec=0,
+            monitor_index=config.POPUP_MONITOR_INDEX,
+            anchor=config.POPUP_POSITION,
+            edge_margin=config.POPUP_EDGE_MARGIN,
             on_close_cb=self._on_popup_closed,
         )
         self._current_popup.set_info_text(self._popup_motion_summary_text())
@@ -665,17 +668,17 @@ class DoorWatchApp:
                     self._current_popup.close()
                     return False
             self._current_popup.set_info_text(self._popup_motion_summary_text())
-            still_open = self._current_popup.update_frame(frame)
-            if not still_open:
-                self._on_popup_closed()
+            self._current_popup.update_frame(frame)
         return False
 
-    def _on_popup_closed(self):
+    def _on_popup_closed(self, reason: str = "unknown"):
+        if (not self._popup_active) and (self._current_popup is None):
+            return
         if self._popup_motion_started_wall_at is not None:
             record_text = self._popup_motion_summary_text()
             with self._popup_record_lock:
                 self._last_popup_motion_record_text = record_text
-            log.info("Popup motion record: %s", record_text)
+            log.info("Popup closed (%s). Motion record: %s", reason, record_text)
         self._stop_popup_video_recording(keep_as_last=True)
         self._popup_active = False
         self._current_popup = None
@@ -683,6 +686,11 @@ class DoorWatchApp:
 
     def _on_mute_toggle(self, muted: bool):
         self._muted = muted
+        if not muted:
+            # If motion was latched while in silent mode, allow a new popup
+            # trigger immediately after unmute.
+            self._motion_event_latched = False
+            self._no_motion_frames = 0
         log.info("Silent mode: %s", "ON" if muted else "OFF")
 
     def _on_quit(self):
