@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PKG_NAME="doorwatch"
 ARCH="all"
 
-VERSION="$(python3 - <<'PY'
+VERSION="$(PYTHONPATH="${ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" python3 - <<'PY'
 from doorwatch import __version__
 print(__version__)
 PY
